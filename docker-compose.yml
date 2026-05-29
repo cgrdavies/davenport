@@ -1,0 +1,17 @@
+services:
+  mcp-icloud-calendar:
+    build: .
+    restart: unless-stopped
+    environment:
+      - ICLOUD_EMAIL=${ICLOUD_EMAIL}
+      - ICLOUD_APP_SPECIFIC_PASSWORD=${ICLOUD_APP_SPECIFIC_PASSWORD}
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN}
+      - RUST_LOG=${RUST_LOG:-info}
+    expose:
+      - "8000"
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true

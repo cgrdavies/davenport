@@ -16,8 +16,30 @@ A **two-tier read surface**: list thin/expanded by default, fetch full detail on
 | `list_events` | **Tier 1.** Expanded, lightweight occurrences in a `[start, end]` window. |
 | `get_event` | **Tier 2.** Full detail for one event by `master_href`; `include_raw` opt-in. |
 | `create_event` | Create a VEVENT. Returns its href + etag. |
-| `update_event` | Replace an event (If-Match safe write; needs uid + etag). |
-| `delete_event` | Delete an event (If-Match; needs etag). |
+| `update_event` | Replace a whole event/series (If-Match; needs uid + etag). |
+| `delete_event` | Delete a whole event/series (If-Match; needs etag). |
+| `update_event_instance` | Edit **one occurrence** of a series via a detached RECURRENCE-ID override. |
+| `delete_event_instance` | Delete **one occurrence** of a series (EXDATE). |
+
+### Single-instance edits
+
+`update_event_instance` / `delete_event_instance` change *one* occurrence
+without mutating the master series. Identify the occurrence by `recurrence_id`
+(its `recurrence_id` from `list_events` if set, else its `start`) and pass the
+`master_href` + `master_etag`. We GET the resource, mutate it, and PUT it back
+with `If-Match` on `master_etag` (a concurrent change → `412`, not a silent
+overwrite):
+
+- **Edit** adds (or updates) a detached VEVENT with the same UID, a
+  `RECURRENCE-ID` = the occurrence's slot, and the new fields. Omitted fields are
+  kept; omit `start`/`end` to keep the slot's time.
+- **Delete** adds an `EXDATE` to the master and drops any override for that slot.
+
+`RECURRENCE-ID`/`EXDATE` are written in the master's DTSTART representation
+(same `TZID`, UTC, or `VALUE=DATE`) so the server matches the slot. The master's
+`SEQUENCE` is mirrored onto new overrides (and never bumped on the master) so the
+expander keeps pairing them. The whole-series `update_event`/`delete_event`
+behaviour is unchanged.
 
 ### `list_events` (Tier 1)
 

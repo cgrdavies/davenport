@@ -5,6 +5,7 @@
 
 mod events;
 mod icloud;
+mod write;
 
 use std::env;
 use std::sync::Arc;
@@ -60,6 +61,39 @@ struct GetEventArgs {
     /// When true, also return the original raw ICS for byte-exact fidelity.
     #[serde(default)]
     include_raw: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct UpdateInstanceArgs {
+    /// The series resource's href (`master_href` from `list_events`).
+    master_href: String,
+    /// The resource's current ETag (`master_etag`) for a safe If-Match write.
+    master_etag: String,
+    /// The occurrence's original slot: pass its `recurrence_id` if set, otherwise
+    /// its `start`. This identifies which occurrence to modify.
+    recurrence_id: String,
+    #[serde(default)]
+    summary: Option<String>,
+    /// New start, RFC3339 (or `YYYY-MM-DD` for all-day). Omit to keep the slot time.
+    #[serde(default)]
+    start: Option<String>,
+    /// New end, RFC3339 (or `YYYY-MM-DD`). Omit to derive from the master duration.
+    #[serde(default)]
+    end: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DeleteInstanceArgs {
+    /// The series resource's href (`master_href` from `list_events`).
+    master_href: String,
+    /// The resource's current ETag (`master_etag`) for a safe If-Match write.
+    master_etag: String,
+    /// The occurrence's original slot: its `recurrence_id` if set, otherwise `start`.
+    recurrence_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -217,6 +251,71 @@ impl CalendarServer {
             .map_err(mcp_err)?;
         let detail = events::project_detail(&ics, args.include_raw).map_err(mcp_err)?;
         json_result(&detail)
+    }
+
+    #[tool(description = "Edit a SINGLE occurrence of a recurring series without \
+        touching the rest. Identify the occurrence by recurrence_id (its \
+        recurrence_id from list_events if set, else its start). Creates or updates \
+        a detached RECURRENCE-ID override; the master series is unchanged. Omitted \
+        fields are left as-is; omit start/end to keep the slot's time. Uses \
+        If-Match on master_etag. For non-recurring events use update_event.")]
+    async fn update_event_instance(
+        &self,
+        Parameters(args): Parameters<UpdateInstanceArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        // Fetch current resource to mutate; If-Match uses the caller's etag so a
+        // concurrent change is rejected (412) rather than silently overwritten.
+        let (ics, _etag) = self
+            .icloud
+            .get_resource(&args.master_href)
+            .await
+            .map_err(mcp_err)?;
+        let fields = write::InstanceFields {
+            summary: args.summary,
+            start: args.start,
+            end: args.end,
+            description: args.description,
+            location: args.location,
+        };
+        let new_ics =
+            write::apply_instance_update(&ics, &args.recurrence_id, &fields).map_err(mcp_err)?;
+        let etag = self
+            .icloud
+            .put_ics_if_match(&args.master_href, new_ics, &args.master_etag)
+            .await
+            .map_err(mcp_err)?;
+        json_result(&serde_json::json!({
+            "master_href": args.master_href,
+            "etag": etag,
+            "updated_instance": args.recurrence_id,
+        }))
+    }
+
+    #[tool(description = "Delete a SINGLE occurrence of a recurring series \
+        (EXDATE) without touching the rest. Identify it by recurrence_id (its \
+        recurrence_id from list_events if set, else its start). Also removes any \
+        existing override for that slot. Uses If-Match on master_etag. For \
+        non-recurring events use delete_event.")]
+    async fn delete_event_instance(
+        &self,
+        Parameters(args): Parameters<DeleteInstanceArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let (ics, _etag) = self
+            .icloud
+            .get_resource(&args.master_href)
+            .await
+            .map_err(mcp_err)?;
+        let new_ics = write::apply_instance_delete(&ics, &args.recurrence_id).map_err(mcp_err)?;
+        let etag = self
+            .icloud
+            .put_ics_if_match(&args.master_href, new_ics, &args.master_etag)
+            .await
+            .map_err(mcp_err)?;
+        json_result(&serde_json::json!({
+            "master_href": args.master_href,
+            "etag": etag,
+            "deleted_instance": args.recurrence_id,
+        }))
     }
 
     #[tool(description = "Create an event in a calendar. Times are RFC3339. \

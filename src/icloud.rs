@@ -114,6 +114,23 @@ impl Icloud {
         Ok((ics, etag))
     }
 
+    /// PUT a full ICS resource back with an If-Match guard. Used by the
+    /// single-instance write path, which fetches, mutates, and re-PUTs the whole
+    /// resource. Returns the new ETag.
+    pub async fn put_ics_if_match(
+        &self,
+        href: &str,
+        ics: String,
+        etag: &str,
+    ) -> Result<Option<String>> {
+        let client = self.cfg.client()?;
+        let resp = client
+            .put_if_match(href, Bytes::from(ics), etag)
+            .await
+            .context("conditional PUT (instance write) failed")?;
+        Ok(etag_of(&resp))
+    }
+
     /// Create a VEVENT in the given calendar. Returns the new event's href.
     #[allow(clippy::too_many_arguments)]
     pub async fn create_event(

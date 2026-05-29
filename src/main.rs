@@ -257,19 +257,40 @@ impl ServerHandler for CalendarServer {
 // Bearer-token auth middleware (protects /mcp; /health stays open)
 // ---------------------------------------------------------------------------
 
+/// Extract a token from a `?token=` / `?access_token=` query string.
+///
+/// This is a fallback for clients that can't set request headers (e.g. adding
+/// the server through a UI that only takes a URL, like Claude Desktop's custom
+/// connector). Prefer the `Authorization: Bearer` header — query-string tokens
+/// can end up in proxy/access logs. The token is a hex string so no
+/// percent-decoding is needed.
+fn token_from_query(query: Option<&str>) -> Option<&str> {
+    query?.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        (k == "token" || k == "access_token").then_some(v)
+    })
+}
+
 async fn require_bearer(
     State(expected): State<Arc<String>>,
     req: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let provided = req
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
-    match provided {
-        Some(token) if token == expected.as_str() => Ok(next.run(req).await),
-        _ => Err(StatusCode::UNAUTHORIZED),
+    // Confine all borrows of `req` to this block so we can move it into
+    // `next.run` afterwards.
+    let authorized = {
+        let header_token = req
+            .headers()
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        let provided = header_token.or_else(|| token_from_query(req.uri().query()));
+        matches!(provided, Some(token) if token == expected.as_str())
+    };
+    if authorized {
+        Ok(next.run(req).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
     }
 }
 

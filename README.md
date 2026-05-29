@@ -25,6 +25,11 @@ All timestamps are RFC3339 (e.g. `2026-05-29T14:00:00Z`).
 - **Every `/mcp` request must send `Authorization: Bearer <MCP_AUTH_TOKEN>`.** The
   server refuses to start without `MCP_AUTH_TOKEN` set, because it holds live
   read/write access to your calendar and is intended to be internet-facing.
+- **Query-string fallback:** clients that can't set headers (e.g. a "custom
+  connector" UI that only takes a URL) may pass the token as
+  `…/mcp?token=<MCP_AUTH_TOKEN>` (`access_token` also accepted). Prefer the
+  header — query strings can land in proxy/access logs. The header takes
+  precedence when both are present.
 
 ## Configuration
 

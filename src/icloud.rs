@@ -141,9 +141,10 @@ impl Icloud {
         end: &str,
         description: Option<&str>,
         location: Option<&str>,
+        rrule: Option<&str>,
     ) -> Result<(String, Option<String>)> {
         let uid = uuid::Uuid::new_v4().to_string();
-        let ics = build_vevent(&uid, summary, start, end, description, location)?;
+        let ics = build_vevent(&uid, summary, start, end, description, location, rrule)?;
         let href = join_href(calendar_href, &format!("{uid}.ics"));
         let client = self.cfg.client()?;
         let resp = client
@@ -168,7 +169,7 @@ impl Icloud {
         description: Option<&str>,
         location: Option<&str>,
     ) -> Result<Option<String>> {
-        let ics = build_vevent(uid, summary, start, end, description, location)?;
+        let ics = build_vevent(uid, summary, start, end, description, location, None)?;
         let client = self.cfg.client()?;
         let resp = client
             .put_if_match(event_href, Bytes::from(ics), etag)
@@ -204,6 +205,7 @@ fn build_vevent(
     end: &str,
     description: Option<&str>,
     location: Option<&str>,
+    rrule: Option<&str>,
 ) -> Result<String> {
     let dtstart = to_caldav_utc(start)?;
     let dtend = to_caldav_utc(end)?;
@@ -221,6 +223,10 @@ fn build_vevent(
         format!("DTEND:{dtend}"),
         format!("SUMMARY:{}", escape_ical(summary)),
     ];
+    if let Some(r) = rrule {
+        // e.g. "FREQ=WEEKLY;COUNT=4". Passed through verbatim (no RRULE: prefix).
+        lines.push(format!("RRULE:{}", r.trim_start_matches("RRULE:")));
+    }
     if let Some(d) = description {
         lines.push(format!("DESCRIPTION:{}", escape_ical(d)));
     }

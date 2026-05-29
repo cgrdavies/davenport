@@ -110,6 +110,10 @@ struct CreateEventArgs {
     description: Option<String>,
     #[serde(default)]
     location: Option<String>,
+    /// Optional recurrence rule (RFC 5545 RRULE), e.g. `FREQ=WEEKLY;COUNT=4` or
+    /// `FREQ=DAILY;UNTIL=20260701T000000Z`. Omit for a one-off event.
+    #[serde(default)]
+    rrule: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -318,7 +322,8 @@ impl CalendarServer {
         }))
     }
 
-    #[tool(description = "Create an event in a calendar. Times are RFC3339. \
+    #[tool(description = "Create an event in a calendar. Times are RFC3339. Pass \
+        an optional rrule (e.g. FREQ=WEEKLY;COUNT=4) to create a recurring series. \
         Returns the new event's href and etag.")]
     async fn create_event(
         &self,
@@ -333,6 +338,7 @@ impl CalendarServer {
                 &args.end,
                 args.description.as_deref(),
                 args.location.as_deref(),
+                args.rrule.as_deref(),
             )
             .await
             .map_err(mcp_err)?;

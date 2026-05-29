@@ -29,7 +29,9 @@ next 30 days. Each occurrence is intentionally thin:
 ```jsonc
 {
   "uid": "…",                 // master event UID
-  "recurrence_id": "…|null",  // the occurrence's slot for series instances; null for one-offs
+  "recurring": true,          // part of a series (from a master RRULE, or a detached override)
+  "recurrence_id": null,      // RFC 5545: present ONLY on a detached override (a VEVENT with a
+                              // real RECURRENCE-ID); null for generated instances and one-offs
   "start": "2026-06-10T15:00:00-04:00",  // RFC3339+offset, or "YYYY-MM-DD" when all_day
   "end":   "2026-06-10T15:30:00-04:00",
   "all_day": false,
@@ -39,6 +41,14 @@ next 30 days. Each occurrence is intentionally thin:
   "master_etag": "…"
 }
 ```
+
+`recurring` vs `recurrence_id` is the signal for single-instance editing:
+
+| | `recurring` | `recurrence_id` | To edit just this occurrence |
+|---|---|---|---|
+| One-off | `false` | `null` | edit the master directly |
+| Generated series instance | `true` | `null` | EXDATE the master at `start` + add a detached VEVENT |
+| Detached override | `true` | the original slot | it's already standalone — edit it in place |
 
 Expansion and timezone resolution (including Apple's custom `VTIMEZONE` blocks)
 are handled by `calcard`; we don't depend on CalDAV server-side `<C:expand>`

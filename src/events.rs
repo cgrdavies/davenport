@@ -28,9 +28,18 @@ const EXPAND_LIMIT: usize = 20_000;
 pub struct Occurrence {
     /// The master event's UID.
     pub uid: String,
-    /// The occurrence's RECURRENCE-ID slot for instances of a recurring series
-    /// (carried from day one so instance edits can be added without a breaking
-    /// change); `null` for one-off events.
+    /// True when this occurrence belongs to a recurring series — i.e. it was
+    /// generated from a master's RRULE, or is a detached override of one. False
+    /// for plain one-off events. (Seriesness, for display/branching.)
+    pub recurring: bool,
+    /// The event's **actual** RECURRENCE-ID, present *only* on a detached
+    /// override (a VEVENT individually modified out of the series). RFC 5545:
+    /// generated instances have no RECURRENCE-ID, so this is `null` for them and
+    /// for one-offs. Write-path signal: non-null ⇒ already a standalone override
+    /// (edit it in place); null + `recurring` ⇒ synthesized from the master
+    /// (edit just this one ⇒ EXDATE the master at `start` + add a detached
+    /// VEVENT). The override's slot value is this field; a generated instance's
+    /// slot is its own `start`.
     pub recurrence_id: Option<String>,
     /// RFC3339 with offset for timed events; a calendar date (`YYYY-MM-DD`) when
     /// `all_day` is true.
@@ -167,11 +176,13 @@ pub fn expand_occurrences(
                 };
 
                 let all_day = comp_all_day(comp);
+                // RECURRENCE-ID is emitted ONLY for genuine detached overrides
+                // (a VEVENT carrying a real RECURRENCE-ID). Generated instances
+                // of a series have none — that distinction is the write-path
+                // signal. Seriesness is reported separately via `recurring`.
+                let recurring = comp.is_recurrent() || comp.is_recurrence_override();
                 let recurrence_id = if comp.is_recurrence_override() {
                     override_recurrence_id(comp, ev.start.timezone(), all_day)
-                } else if comp.is_recurrent() {
-                    // Generated occurrence: its slot is its own start.
-                    Some(fmt_dt(&ev.start, all_day))
                 } else {
                     None
                 };
@@ -180,6 +191,7 @@ pub fn expand_occurrences(
                     start_ts,
                     Occurrence {
                         uid: comp.uid().unwrap_or_default().to_string(),
+                        recurring,
                         recurrence_id,
                         start: fmt_dt(&ev.start, all_day),
                         end: fmt_dt(&ev.end, all_day),
@@ -310,6 +322,7 @@ mod tests {
         assert_eq!(occ.len(), 1);
         assert_eq!(occ[0].uid, "one-off");
         assert_eq!(occ[0].recurrence_id, None);
+        assert!(!occ[0].recurring, "a one-off is not part of a series");
         assert!(!occ[0].all_day);
         assert_eq!(occ[0].summary, "Solo");
         assert_eq!(occ[0].master_href, "/cal/abc.ics");
@@ -329,6 +342,7 @@ mod tests {
         assert!(occ[0].all_day, "DATE-valued DTSTART should be all_day");
         assert_eq!(occ[0].start, "2026-06-12");
         assert_eq!(occ[0].recurrence_id, None);
+        assert!(!occ[0].recurring);
     }
 
     #[test]
@@ -346,8 +360,13 @@ mod tests {
         let starts: Vec<&str> = occ.iter().map(|o| o.start.as_str()).collect();
         assert!(starts.iter().all(|s| !s.starts_with("2026-06-10")), "Jun 10 excluded");
         assert!(starts.iter().all(|s| !s.starts_with("2026-06-24")), "Jun 24 excluded");
-        // Every occurrence of a series carries its recurrence_id slot.
-        assert!(occ.iter().all(|o| o.recurrence_id.is_some()));
+        // Generated instances are flagged `recurring` but carry NO recurrence_id
+        // (they have no RECURRENCE-ID property — only real overrides do).
+        assert!(occ.iter().all(|o| o.recurring), "all are series instances");
+        assert!(
+            occ.iter().all(|o| o.recurrence_id.is_none()),
+            "generated instances must not have a RECURRENCE-ID"
+        );
         assert!(occ.iter().all(|o| o.uid == "weekly"));
     }
 
@@ -366,8 +385,17 @@ mod tests {
         // The override replaces the generated Jun 10 slot.
         let moved = occ.iter().find(|o| o.summary == "Standup (moved)").expect("override present");
         assert!(moved.start.starts_with("2026-06-10T17:30"), "moved to 17:30: {}", moved.start);
-        // Its recurrence_id is the ORIGINAL slot (15:00), not the new start.
+        // The override carries a REAL recurrence_id = the ORIGINAL slot (15:00),
+        // not its new start. This is the one occurrence that should have it.
+        assert!(moved.recurring);
         assert_eq!(moved.recurrence_id.as_deref(), Some("2026-06-10T15:00:00+00:00"));
+        // The generated (non-override) siblings are recurring but have NO recurrence_id.
+        let generated: Vec<_> = occ.iter().filter(|o| o.summary == "Standup").collect();
+        assert_eq!(generated.len(), 3, "3 generated weekly slots remain");
+        assert!(
+            generated.iter().all(|o| o.recurring && o.recurrence_id.is_none()),
+            "generated siblings: recurring=true, recurrence_id=null"
+        );
         // No generated 15:00 Jun 10 occurrence remains.
         assert!(
             !occ.iter().any(|o| o.start.starts_with("2026-06-10T15:00")),

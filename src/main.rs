@@ -25,7 +25,8 @@ use rmcp::{
     },
     tool, tool_handler, tool_router,
     transport::streamable_http_server::{
-        StreamableHttpService, session::local::LocalSessionManager,
+        StreamableHttpServerConfig, StreamableHttpService,
+        session::local::LocalSessionManager,
     },
 };
 use schemars::JsonSchema;
@@ -301,10 +302,24 @@ async fn main() -> anyhow::Result<()> {
         password,
     });
 
+    // DNS-rebinding protection: rmcp only accepts loopback Host headers by
+    // default. Behind a reverse proxy on a public domain we must allow the
+    // external hostname(s) via MCP_ALLOWED_HOSTS (comma-separated).
+    let mut allowed_hosts: Vec<String> =
+        vec!["localhost".into(), "127.0.0.1".into(), "::1".into()];
+    allowed_hosts.extend(
+        env::var("MCP_ALLOWED_HOSTS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|h| h.trim().to_string())
+            .filter(|h| !h.is_empty()),
+    );
+    let config = StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts);
+
     let service = StreamableHttpService::new(
         move || Ok::<_, std::io::Error>(CalendarServer::new(icloud.clone())),
         LocalSessionManager::default().into(),
-        Default::default(),
+        config,
     );
 
     let auth_token = Arc::new(auth_token);

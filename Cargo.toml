@@ -8,7 +8,9 @@ description = "Rust MCP server bridging AI agents to Apple iCloud Calendar over 
 anyhow = "1.0.102"
 axum = "0.8.9"
 bytes = "1.11.1"
+calcard = "0.3.4"
 chrono = { version = "0.4.44", features = ["serde"] }
+chrono-tz = "0.10"
 fast-dav-rs = "0.4.3"
 http = "1.4.1"
 rmcp = { version = "1.7.0", features = ["server", "macros", "transport-streamable-http-server"] }

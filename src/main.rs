@@ -3,10 +3,13 @@
 //! Transport: Streamable HTTP (rmcp) mounted at `/mcp`, guarded by a bearer token.
 //! A plaintext `/health` endpoint is left unauthenticated for container health checks.
 
+mod events;
 mod icloud;
 
 use std::env;
 use std::sync::Arc;
+
+use chrono::{Duration, Utc};
 
 use axum::{
     Router,
@@ -42,12 +45,21 @@ use icloud::{ICLOUD_CALDAV_URL, Icloud, IcloudConfig};
 struct ListEventsArgs {
     /// The calendar's CalDAV href (from `list_calendars`).
     calendar_href: String,
-    /// Optional window start, RFC3339 (e.g. `2026-05-29T00:00:00Z`).
+    /// Window start, RFC3339 (e.g. `2026-05-29T00:00:00Z`). Defaults to now.
     #[serde(default)]
     start: Option<String>,
-    /// Optional window end, RFC3339.
+    /// Window end, RFC3339. Defaults to 30 days after `start`.
     #[serde(default)]
     end: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetEventArgs {
+    /// The event resource's CalDAV href (the `master_href` from `list_events`).
+    master_href: String,
+    /// When true, also return the original raw ICS for byte-exact fidelity.
+    #[serde(default)]
+    include_raw: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -105,14 +117,6 @@ struct CalendarOut {
     sync_token: Option<String>,
 }
 
-#[derive(Serialize)]
-struct EventOut {
-    href: String,
-    etag: Option<String>,
-    status: Option<String>,
-    calendar_data: Option<String>,
-}
-
 // ---------------------------------------------------------------------------
 // MCP server
 // ---------------------------------------------------------------------------
@@ -153,27 +157,66 @@ impl CalendarServer {
         json_result(&out)
     }
 
-    #[tool(description = "List events in a calendar, optionally within a time \
-        window (RFC3339 start/end). Returns raw iCalendar VEVENT data plus href/etag.")]
+    #[tool(description = "List calendar events as expanded, lightweight \
+        occurrences within a [start, end] window (RFC3339; defaults to the next \
+        30 days). Recurring series are expanded server-side (one entry per \
+        occurrence, EXDATEs dropped, RECURRENCE-ID overrides applied). Each entry \
+        is thin: uid, recurrence_id, start, end, all_day, summary, location, and \
+        master_href/master_etag for addressing. Use get_event for full detail.")]
     async fn list_events(
         &self,
         Parameters(args): Parameters<ListEventsArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let events = self
+        // Resolve the window. Default to [now, now + 30d]; expansion needs a
+        // bounded window or recurring series would be unbounded.
+        let window_start = match args.start.as_deref() {
+            Some(s) => chrono::DateTime::parse_from_rfc3339(s)
+                .map_err(mcp_err)?
+                .with_timezone(&Utc),
+            None => Utc::now(),
+        };
+        let window_end = match args.end.as_deref() {
+            Some(e) => chrono::DateTime::parse_from_rfc3339(e)
+                .map_err(mcp_err)?
+                .with_timezone(&Utc),
+            None => window_start + Duration::days(30),
+        };
+
+        let objects = self
             .icloud
-            .list_events(&args.calendar_href, args.start.as_deref(), args.end.as_deref())
+            .list_events(
+                &args.calendar_href,
+                args.start.as_deref(),
+                args.end.as_deref(),
+            )
             .await
             .map_err(mcp_err)?;
-        let out: Vec<EventOut> = events
+        // (master_href, master_etag, calendar_data) for resources that returned data.
+        let resources: Vec<(String, Option<String>, String)> = objects
             .into_iter()
-            .map(|e| EventOut {
-                href: e.href,
-                etag: e.etag,
-                status: e.status,
-                calendar_data: e.calendar_data,
-            })
+            .filter_map(|o| o.calendar_data.map(|data| (o.href, o.etag, data)))
             .collect();
-        json_result(&out)
+
+        let occurrences = events::expand_occurrences(&resources, window_start, window_end);
+        json_result(&occurrences)
+    }
+
+    #[tool(description = "Get full detail for a single event by its master_href \
+        (from list_events): summary, description, location, status, start/end, \
+        recurrence (rrule), organizer, attendees, and any RECURRENCE-ID overrides. \
+        Set include_raw=true to also return the original ICS. This is the opt-in \
+        depth path — use it before editing or to inspect, not for listing.")]
+    async fn get_event(
+        &self,
+        Parameters(args): Parameters<GetEventArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let (ics, _etag) = self
+            .icloud
+            .get_resource(&args.master_href)
+            .await
+            .map_err(mcp_err)?;
+        let detail = events::project_detail(&ics, args.include_raw).map_err(mcp_err)?;
+        json_result(&detail)
     }
 
     #[tool(description = "Create an event in a calendar. Times are RFC3339. \

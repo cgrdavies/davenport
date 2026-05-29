@@ -104,6 +104,16 @@ impl Icloud {
             .context("calendar_query_timerange failed")
     }
 
+    /// Fetch a single calendar resource (the `.ics` at `href`) and its ETag.
+    /// Used by `get_event` for full-fidelity detail.
+    pub async fn get_resource(&self, href: &str) -> Result<(String, Option<String>)> {
+        let client = self.cfg.client()?;
+        let resp = client.get(href).await.context("GET (get_event) failed")?;
+        let etag = etag_of(&resp);
+        let ics = String::from_utf8_lossy(resp.body()).into_owned();
+        Ok((ics, etag))
+    }
+
     /// Create a VEVENT in the given calendar. Returns the new event's href.
     #[allow(clippy::too_many_arguments)]
     pub async fn create_event(

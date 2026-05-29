@@ -4,17 +4,53 @@ A small, self-contained **MCP server** that gives AI agents access to an **Apple
 
 > Named after the writing desk — it's where your agents sit down to manage your calendar. (Also a nod to Cal**DAV**.)
 
-Written in Rust: [`rmcp`](https://crates.io/crates/rmcp) (official MCP SDK) + [`fast-dav-rs`](https://crates.io/crates/fast-dav-rs) (async CalDAV client) + `axum`.
+Written in Rust: [`rmcp`](https://crates.io/crates/rmcp) (official MCP SDK) + [`fast-dav-rs`](https://crates.io/crates/fast-dav-rs) (async CalDAV client) + [`calcard`](https://crates.io/crates/calcard) (iCalendar parsing + RFC 5545 recurrence expansion + timezone resolution) + `axum`.
 
 ## Tools
+
+A **two-tier read surface**: list thin/expanded by default, fetch full detail on demand.
 
 | Tool | Description |
 |------|-------------|
 | `list_calendars` | List the user's calendars (name + CalDAV href). |
-| `list_events` | List events in a calendar, optional RFC3339 time window. |
+| `list_events` | **Tier 1.** Expanded, lightweight occurrences in a `[start, end]` window. |
+| `get_event` | **Tier 2.** Full detail for one event by `master_href`; `include_raw` opt-in. |
 | `create_event` | Create a VEVENT. Returns its href + etag. |
 | `update_event` | Replace an event (If-Match safe write; needs uid + etag). |
 | `delete_event` | Delete an event (If-Match; needs etag). |
+
+### `list_events` (Tier 1)
+
+Recurrences are expanded **server-side** for the requested window — one entry per
+*occurrence*, not per recurring master. EXDATE'd dates are dropped and
+`RECURRENCE-ID` overrides replace their generated slot. Window defaults to the
+next 30 days. Each occurrence is intentionally thin:
+
+```jsonc
+{
+  "uid": "…",                 // master event UID
+  "recurrence_id": "…|null",  // the occurrence's slot for series instances; null for one-offs
+  "start": "2026-06-10T15:00:00-04:00",  // RFC3339+offset, or "YYYY-MM-DD" when all_day
+  "end":   "2026-06-10T15:30:00-04:00",
+  "all_day": false,
+  "summary": "Standup",
+  "location": "…",            // omitted when empty
+  "master_href": "…",         // address the resource for get_event / writes
+  "master_etag": "…"
+}
+```
+
+Expansion and timezone resolution (including Apple's custom `VTIMEZONE` blocks)
+are handled by `calcard`; we don't depend on CalDAV server-side `<C:expand>`
+(iCloud's support is flaky) — correctness comes from our own expansion.
+
+### `get_event` (Tier 2)
+
+Full fidelity for a single event addressed by `master_href`: summary,
+description, location, status, start/end, `rrule`, organizer, attendees, and any
+`RECURRENCE-ID` overrides. `include_raw` defaults to **false**; set it true to
+also get the original ICS string. This is the opt-in depth path — pulled before
+an edit or for inspection, never part of the default list flow.
 
 All timestamps are RFC3339 (e.g. `2026-05-29T14:00:00Z`).
 

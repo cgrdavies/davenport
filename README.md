@@ -1,6 +1,8 @@
-# mcp-icloud-calendar-rs
+# davenport
 
 A small, self-contained **MCP server** that gives AI agents access to an **Apple iCloud Calendar** over CalDAV — exposed via **Streamable HTTP** so remote agents (claude.ai connectors, IDEs, etc.) can connect.
+
+> Named after the writing desk — it's where your agents sit down to manage your calendar. (Also a nod to Cal**DAV**.)
 
 Written in Rust: [`rmcp`](https://crates.io/crates/rmcp) (official MCP SDK) + [`fast-dav-rs`](https://crates.io/crates/fast-dav-rs) (async CalDAV client) + `axum`.
 

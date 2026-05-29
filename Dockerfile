@@ -18,10 +18,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/mcp-icloud-calendar-rs /usr/local/bin/mcp-icloud-calendar-rs
+COPY --from=builder /app/target/release/davenport /usr/local/bin/davenport
 
 ENV MCP_BIND=0.0.0.0:8000
 EXPOSE 8000
 USER 1000:1000
 
-ENTRYPOINT ["/usr/local/bin/mcp-icloud-calendar-rs"]
+ENTRYPOINT ["/usr/local/bin/davenport"]

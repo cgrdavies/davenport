@@ -241,7 +241,7 @@ impl ServerHandler for CalendarServer {
         info.protocol_version = ProtocolVersion::V_2025_03_26;
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info.server_info =
-            Implementation::new("mcp-icloud-calendar-rs", env!("CARGO_PKG_VERSION"));
+            Implementation::new("davenport", env!("CARGO_PKG_VERSION"));
         info.instructions = Some(
             "Apple iCloud Calendar over CalDAV. Call list_calendars first to \
              get a calendar href, then list/create/update/delete events. All \
@@ -317,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(mcp);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
-    tracing::info!("mcp-icloud-calendar-rs listening on http://{bind}/mcp");
+    tracing::info!("davenport listening on http://{bind}/mcp");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(async {

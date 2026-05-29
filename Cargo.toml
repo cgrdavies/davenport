@@ -1,7 +1,8 @@
 [package]
-name = "mcp-icloud-calendar-rs"
+name = "davenport"
 version = "0.1.0"
 edition = "2024"
+description = "Rust MCP server bridging AI agents to Apple iCloud Calendar over CalDAV (Streamable HTTP)"
 
 [dependencies]
 anyhow = "1.0.102"

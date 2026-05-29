@@ -1,5 +1,5 @@
 services:
-  mcp-icloud-calendar:
+  davenport:
     build: .
     restart: unless-stopped
     environment:

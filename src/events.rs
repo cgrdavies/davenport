@@ -282,14 +282,15 @@ pub fn project_detail(ics: &str, include_raw: bool) -> Result<EventDetail> {
     })
 }
 
-/// Render an RRULE entry back to its `FREQ=…;…` form. Falls back to `None` if
-/// the value isn't a recurrence rule (caller can still use `include_raw`).
+/// Render an RRULE entry back to its canonical `FREQ=…;…` form using calcard's
+/// own writer (so it matches the wire format, not Rust's Debug).
 fn render_rrule(entry: &calcard::icalendar::ICalendarEntry) -> Option<String> {
-    use calcard::icalendar::ICalendarValue;
-    match entry.values.first()? {
-        ICalendarValue::RecurrenceRule(rule) => Some(format!("{rule:?}")),
-        other => other.as_text().map(str::to_string),
-    }
+    let mut line = String::new();
+    entry.write_to(&mut line).ok()?;
+    // `line` is e.g. "RRULE:FREQ=WEEKLY;COUNT=4\r\n", possibly folded across
+    // lines as "\r\n " — unfold, then strip the property name.
+    let unfolded = line.replace("\r\n ", "").replace(['\r', '\n'], "");
+    unfolded.strip_prefix("RRULE:").map(str::to_string)
 }
 
 #[cfg(test)]

@@ -3,3 +3,4 @@
 .env.local
 *.log
 .mcp_auth_token.txt
+live_test.py
